@@ -1,7 +1,7 @@
-import { Page, Card, Text, BlockStack, InlineStack, Spinner } from "@shopify/polaris";
-import { getInventory } from "../models/inventory.server";
+import { Page, Card, Text, BlockStack, Button } from "@shopify/polaris";
+import { claimStock, getInventory } from "../models/inventory.server";
 import type { Route } from "./+types/dashboard";
-import { Await, useLoaderData } from "react-router";
+import { Await, useFetcher, useLoaderData } from "react-router";
 import { Suspense } from "react";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -10,11 +10,42 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
 }
 
+
+export async function action({ request }: Route.ActionArgs) {
+    const formData = await request.formData();
+
+    const itemId = formData.get("itemId");
+
+    if (typeof itemId !== "string" || !itemId) {
+        return {
+            ok: false,
+            error: "Missing item id."
+        }
+    }
+
+    try {
+        await claimStock(itemId);
+
+        return {
+            ok: true,
+        }
+    } catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error.message : "Failed to claim item.",
+        }
+    }
+}
+
 type InventoryItem = {
     id: string;
     name: string;
     stock: number;
 }
+
+type ClaimActionData =
+    | { ok: true }
+    | { ok: false; error: string };
 
 export default function DashboardPage() {
     const { inventory } = useLoaderData<typeof loader>();
@@ -110,17 +141,49 @@ function InventoryList({ items }: { items: InventoryItem[] }) {
             }}
         >
             {items.map((item) => (
-                <Card key={item.id}>
-                    <BlockStack gap="100">
-                        <Text as="h4" variant="headingSm">
-                            {item.name}
-                        </Text>
-                        <Text as="p" variant="bodyMd" tone="subdued">
-                            Stock: {item.stock}
-                        </Text>
-                    </BlockStack>
-                </Card>
+                <InventoryItemCard key={item.id} item={item} />
             ))}
         </div>
     );
+}
+
+/* -------- Inventory Item Card -------- */
+function InventoryItemCard({ item }: { item: InventoryItem }) {
+    const fetcher = useFetcher<ClaimActionData>();
+
+    const isThisItemSubmitting =
+        fetcher.state !== "idle" &&
+        fetcher.formData?.get("itemId") === item.id;
+
+    const optimisticStock =
+        isThisItemSubmitting && item.stock > 0 ? item.stock - 1 : item.stock;
+
+    const actionError =
+        fetcher.data && !fetcher.data.ok ? fetcher.data.error : null;
+
+    return (
+        <Card>
+            <BlockStack gap="300">
+                <BlockStack gap="100">
+                    <Text as="h4" variant="headingSm">
+                        {item.name}
+                    </Text>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                        Stock: {optimisticStock}
+                    </Text>
+                </BlockStack>
+                {actionError ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                        {actionError}
+                    </Text>
+                ) : null}
+                <fetcher.Form method="post">
+                    <input type="hidden" name="itemId" value={item.id} />
+                    <Button submit variant="primary" loading={isThisItemSubmitting} disabled={isThisItemSubmitting}>
+                        Claim One
+                    </Button>
+                </fetcher.Form>
+            </BlockStack>
+        </Card>
+    )
 }
