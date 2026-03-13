@@ -1,7 +1,7 @@
-import { Page, Card, Text, BlockStack, Button } from "@shopify/polaris";
+import { Page, Card, Text, BlockStack, Button, Banner, Box, InlineGrid } from "@shopify/polaris";
 import { claimStock, getInventory } from "../models/inventory.server";
 import type { Route } from "./+types/dashboard";
-import { Await, useFetcher, useLoaderData } from "react-router";
+import { Await, isRouteErrorResponse, useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { Suspense } from "react";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -51,6 +51,23 @@ export default function DashboardPage() {
     const { inventory } = useLoaderData<typeof loader>();
 
     return (
+        <DashboardShell
+            inventoryContent={
+                <Suspense fallback={<InventoryGridSkeleton />}>
+                    <Await resolve={inventory}>
+                        {(items: InventoryItem[]) => (
+                            <InventoryList items={items} />
+                        )}
+                    </Await>
+                </Suspense>
+            }
+        />
+    )
+}
+
+/* --------- Dashboard Shell --------- */
+function DashboardShell({ inventoryContent }: { inventoryContent: React.ReactNode }) {
+    return (
         <Page title="Inventory Dashboard">
             <BlockStack gap="500">
                 {/* -------- static shell -------- */}
@@ -71,13 +88,7 @@ export default function DashboardPage() {
                         <Text as="h3" variant="headingSm">
                             Inventory List
                         </Text>
-                        <Suspense fallback={<InventoryGridSkeleton />}>
-                            <Await resolve={inventory}>
-                                {(items: InventoryItem[]) => (
-                                    <InventoryList items={items} />
-                                )}
-                            </Await>
-                        </Suspense>
+                        {inventoryContent}
                     </BlockStack>
                 </Card>
             </BlockStack>
@@ -88,37 +99,34 @@ export default function DashboardPage() {
 /* -------- Loading State -------- */
 function InventoryGridSkeleton() {
     return (
-        <div
-            style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                gap: "16px",
-            }}
-        >
+        <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="400">
+
             {Array.from({ length: 4 }).map((_, index) => (
                 <Card key={index}>
-                    <BlockStack gap="100">
-                        <div
-                            style={{
-                                height: "20px",
-                                width: "70%",
-                                borderRadius: "6px",
-                                background: "var(--p-color-bg-fill-tertiary)",
-                            }}
+                    <BlockStack gap="200">
+                        <Box
+                            minHeight="20px"
+                            width="70%"
+                            background="bg-fill-tertiary"
+                            borderRadius="200"
                         />
-                        <div
-                            style={{
-                                height: "16px",
-                                width: "40%",
-                                borderRadius: "6px",
-                                background: "var(--p-color-bg-fill-tertiary)",
-                            }}
+                        <Box
+                            minHeight="16px"
+                            width="40%"
+                            background="bg-fill-tertiary"
+                            borderRadius="200"
+                        />
+                        <Box
+                            minHeight="32px"
+                            width="50%"
+                            background="bg-fill-tertiary"
+                            borderRadius="200"
                         />
                     </BlockStack>
                 </Card>
             ))}
 
-        </div>
+        </InlineGrid>
     )
 }
 
@@ -133,17 +141,12 @@ function InventoryList({ items }: { items: InventoryItem[] }) {
     }
 
     return (
-        <div
-            style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "16px",
-            }}
-        >
+        <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="400">
+
             {items.map((item) => (
                 <InventoryItemCard key={item.id} item={item} />
             ))}
-        </div>
+        </InlineGrid>
     );
 }
 
@@ -185,5 +188,45 @@ function InventoryItemCard({ item }: { item: InventoryItem }) {
                 </fetcher.Form>
             </BlockStack>
         </Card>
+    )
+}
+
+/* -------- Error Boundary -------- */
+export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
+    const revalidator = useRevalidator();
+    const isRetrying = revalidator.state === "loading";
+
+    let message = "Failed to load inventory.";
+    let details = "Please try again.";
+
+    if (isRouteErrorResponse(error)) {
+        details = typeof error.data === "string" ?
+            error.data : `${error.status} ${error.statusText}`;
+    } else if (error instanceof Error) {
+        details = error.message;
+    }
+
+    return (
+        <DashboardShell
+            inventoryContent={
+                <Banner tone="critical">
+                    <BlockStack gap="300">
+                        <Text as="p" variant="bodyMd" fontWeight="semibold">
+                            {message}
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                            {details}
+                        </Text>
+                        <Button
+                            onClick={() => revalidator.revalidate()}
+                            loading={isRetrying}
+                            disabled={isRetrying}
+                        >
+                            Retry
+                        </Button>
+                    </BlockStack>
+                </Banner>
+            }
+        />
     )
 }
